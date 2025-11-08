@@ -38,6 +38,14 @@ class MonthView<T extends Object?> extends StatefulWidget {
   /// Called when user changes month.
   final CalendarPageChangeCallBack? onPageChange;
 
+  ///Called when the user drags the last page to the left. Requesting a new page.
+  ///Made for pagination with a request to the database.
+  final CalendarPageChangeCallBack? onHasReachedEnd;
+
+  ///Called when the user drags the first page to the right.
+  ///Requesting a new previous page. Made for paging with a request to the database.
+  final CalendarPageChangeCallBack? onHasReachedStart;
+
   /// This function will be called when user taps on month view cell.
   final CellTapCallback<T>? onCellTap;
 
@@ -188,6 +196,10 @@ class MonthView<T extends Object?> extends StatefulWidget {
   /// defines that show and hide cell not is in current month
   final bool hideDaysNotInMonth;
 
+  //defines to receive new page request when there is no previous and next page.
+  //Suitable for database request.
+  final bool callBackStartEndPage;
+
   /// Main [Widget] to display month view.
   const MonthView({
     Key? key,
@@ -208,6 +220,8 @@ class MonthView<T extends Object?> extends StatefulWidget {
     this.pageTransitionCurve = Curves.ease,
     this.width,
     this.onPageChange,
+    this.onHasReachedEnd,
+    this.onHasReachedStart,
     this.onCellTap,
     this.onEventTap,
     this.onEventTapDetails,
@@ -227,8 +241,13 @@ class MonthView<T extends Object?> extends StatefulWidget {
     this.onEventDoubleTap,
     this.showWeekTileBorder = true,
     this.hideDaysNotInMonth = false,
+    this.callBackStartEndPage = false,
   })  : assert(!(onHeaderTitleTap != null && headerBuilder != null),
             "can't use [onHeaderTitleTap] & [headerBuilder] simultaneously"),
+        assert(
+            !(callBackStartEndPage &&
+                (onHasReachedEnd == null || onHasReachedStart == null)),
+            "When [callBackStartEndPage] is true, [onHasReachedEnd] and [onHasReachedStart] must not be null"),
         super(key: key);
 
   @override
@@ -340,6 +359,38 @@ class MonthViewState<T extends Object?> extends State<MonthView<T>> {
     super.dispose();
   }
 
+  void onHorizontalDragStartEnd(DragEndDetails dragEndDetails,
+      {required bool isFirstPage, required bool isLastPage}) {
+    if (isFirstPage && isLastPage) {
+      if (dragEndDetails.primaryVelocity! > 0) {
+        previousPage();
+      }
+      if (dragEndDetails.primaryVelocity! < 0) {
+        widget.onHasReachedEnd?.call(_currentDate, _currentIndex);
+      }
+      if (dragEndDetails.primaryVelocity! < 0) {
+        nextPage();
+      }
+      if (dragEndDetails.primaryVelocity! > 0) {
+        widget.onHasReachedStart?.call(_currentDate, _currentIndex);
+      }
+    } else if (isLastPage) {
+      if (dragEndDetails.primaryVelocity! > 0) {
+        previousPage();
+      }
+      if (dragEndDetails.primaryVelocity! < 0) {
+        widget.onHasReachedEnd?.call(_currentDate, _currentIndex);
+      }
+    } else if (isFirstPage) {
+      if (dragEndDetails.primaryVelocity! < 0) {
+        nextPage();
+      }
+      if (dragEndDetails.primaryVelocity! > 0) {
+        widget.onHasReachedStart?.call(_currentDate, _currentIndex);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeAreaWrapper(
@@ -364,6 +415,85 @@ class MonthViewState<T extends Object?> extends State<MonthView<T>> {
                     start: widget.startDay,
                     showWeekEnds: widget.showWeekends,
                   );
+
+                  if (widget.callBackStartEndPage) {
+                    // build callBack Drags Pagination
+                    //
+                    final bool isFirstPage = index == 0;
+                    final bool isLastPage = index == _totalMonths - 1;
+                    if (isFirstPage || isLastPage) {
+                      return GestureDetector(
+                        onHorizontalDragEnd: (details) =>
+                            onHorizontalDragStartEnd(details,
+                                isFirstPage: isFirstPage,
+                                isLastPage: isLastPage),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: _width,
+                              child: Row(
+                                children: List.generate(
+                                  widget.showWeekends ? 7 : 5,
+                                  (index) => Expanded(
+                                    child: SizedBox(
+                                      width: _cellWidth,
+                                      child: _weekBuilder(
+                                          weekDays[index].weekday - 1),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final dates = date.datesOfMonths(
+                                    startDay: widget.startDay,
+                                    hideDaysNotInMonth:
+                                        widget.hideDaysNotInMonth,
+                                    showWeekends: widget.showWeekends,
+                                  );
+                                  final _cellAspectRatio =
+                                      widget.useAvailableVerticalSpace
+                                          ? calculateCellAspectRatio(
+                                              height: constraints.maxHeight,
+                                              daysInMonth: dates.length,
+                                            )
+                                          : widget.cellAspectRatio;
+
+                                  return SizedBox(
+                                    height: _height,
+                                    width: _width,
+                                    child: _MonthPageBuilder<T>(
+                                      key: ValueKey(date.toIso8601String()),
+                                      onCellTap: widget.onCellTap,
+                                      onDateLongPress: widget.onDateLongPress,
+                                      width: _width,
+                                      height: _height,
+                                      controller: controller,
+                                      borderColor: widget.borderColor,
+                                      borderSize: widget.borderSize,
+                                      cellBuilder: _cellBuilder,
+                                      cellRatio: _cellAspectRatio,
+                                      date: date,
+                                      showBorder: widget.showBorder,
+                                      startDay: widget.startDay,
+                                      physics: widget.pagePhysics,
+                                      hideDaysNotInMonth:
+                                          widget.hideDaysNotInMonth,
+                                      weekDays: widget.showWeekends ? 7 : 5,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                  }
 
                   return Column(
                     mainAxisSize: MainAxisSize.min,
